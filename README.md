@@ -79,6 +79,23 @@ energy, and 200 points.
   roughly one blast every two seconds. It cannot be spammed.
 - **Stomping** has a 9-tick cooldown, so timing beats key-mashing.
 
+## No sound?
+
+The note icon by the volume slider turns **amber** when the audio context is
+not actually running — tap or click anywhere to start it.
+
+**On iPhone and iPad, check the physical silent/ringer switch first.** iOS
+mutes Web Audio when that switch is engaged, even at full volume, and no
+amount of JavaScript overrides it. The page plays a looping silent audio
+element to promote itself to the "playback" audio session, which works around
+this in most cases, but the switch can still win.
+
+Other things worth knowing on WebKit: the audio context only truly starts if
+a buffer is *played* inside a user gesture (`resume()` alone can leave it
+suspended), and iOS suspends it again whenever the page is backgrounded or
+the screen locks. The game handles both, re-arming on any tap, key, or
+visibility change.
+
 ## Running locally
 
 No build step, no dependencies, no package manager. Clone it and open

@@ -518,6 +518,27 @@ class Chip {
   }
 }
 
+/** A short silent WAV as a data URI, built at runtime.
+ *  iOS treats WebAudio-only pages as "ambient" audio, which the physical
+ *  ringer switch mutes. Playing a looping <audio> element promotes the page
+ *  to the "playback" category so the synth is audible either way. */
+function silentWav(seconds = 1) {
+  const sr = 8000;
+  const n = Math.floor(sr * seconds);
+  const buf = new ArrayBuffer(44 + n * 2);
+  const v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, 'data'); v.setUint32(40, n * 2, true);
+  let bin = '';
+  const u8 = new Uint8Array(buf);
+  for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+  return 'data:audio/wav;base64,' + btoa(bin);
+}
+
 /** Live wrapper: owns the real AudioContext, the unlock dance, and volume. */
 class Sfx {
   static STORE = 'kaiju.volume';
@@ -542,11 +563,48 @@ class Sfx {
     this.ctx = new AC();
     this.chip = new Chip(this.ctx);
     this.chip.setVolume(this.volume);
+    this.unlock();
     if (this.musicOn) this.chip.startMusic();
   }
 
+  /** WebKit only truly starts a context if a buffer is *played* inside the
+   *  gesture -- resume() alone can leave it silently suspended. */
+  unlock() {
+    if (!this.ctx) return;
+    try {
+      const b = this.ctx.createBuffer(1, 1, 22050);
+      const s = this.ctx.createBufferSource();
+      s.buffer = b;
+      s.connect(this.ctx.destination);
+      s.start(0);
+    } catch (e) { /* nothing to do */ }
+    this.resume();
+
+    if (!this._keeper) {
+      try {
+        const a = new Audio(silentWav(1));
+        a.loop = true;
+        a.setAttribute('playsinline', '');
+        a.volume = 0.01;
+        const pr = a.play();
+        if (pr && pr.catch) pr.catch(() => { /* blocked; harmless */ });
+        this._keeper = a;
+      } catch (e) { /* ignore */ }
+    }
+  }
+
   resume() {
-    if (this.ctx && this.ctx.state !== 'running') this.ctx.resume();
+    if (this.ctx && this.ctx.state !== 'running') {
+      const p = this.ctx.resume();
+      if (p && p.catch) p.catch(() => { /* ignore */ });
+    }
+  }
+
+  /** What the UI should show: 'running', 'suspended', or 'none'. */
+  get status() {
+    if (!this.enabled) return 'muted';
+    if (!this.ctx) return 'none';
+    return this.ctx.state;
   }
 
   play(name) {
@@ -1142,6 +1200,7 @@ class Game {
     last = performance.now();
   }
 
+  const volBox = document.getElementById('vol');
   const volEl = document.getElementById('volume');
   const volVal = document.getElementById('volval');
   const showVol = (v) => {
@@ -1149,19 +1208,38 @@ class Game {
     volEl.value = pct;
     volVal.textContent = pct;
   };
+  // Surface the real audio state so a silent device is diagnosable, not a mystery.
+  const paintAudioState = () => {
+    const st = sfx.status;
+    volBox.dataset.state = st;
+    volBox.title = st === 'running' ? 'Audio running'
+      : st === 'suspended' ? 'Audio suspended — tap the screen'
+      : st === 'muted' ? 'Muted (B)'
+      : 'Audio not started yet';
+  };
   showVol(sfx.volume);
   volEl.addEventListener('input', () => {
     sfx.init();
     sfx.resume();
     showVol(sfx.setVolume(volEl.value / 100));
+    paintAudioState();
   });
+  paintAudioState();
 
   startBtn.addEventListener('click', begin);
 
   // Browsers only allow audio to start from a user gesture, and a context can
   // be re-suspended by the OS (tab switch, screen lock). Nudge it on anything.
-  ['pointerdown', 'keydown', 'touchstart'].forEach((ev) =>
-    addEventListener(ev, () => { sfx.init(); sfx.resume(); }, { passive: true }));
+  ['pointerdown', 'touchstart', 'touchend', 'keydown', 'click'].forEach((ev) =>
+    addEventListener(ev, () => { sfx.init(); sfx.unlock(); paintAudioState(); },
+                     { passive: true }));
+
+  // iOS suspends the context whenever the page is backgrounded or the screen
+  // locks; nothing re-starts it on return without an explicit resume.
+  addEventListener('visibilitychange', () => {
+    if (!document.hidden) { sfx.resume(); paintAudioState(); }
+  });
+  addEventListener('pageshow', () => { sfx.resume(); paintAudioState(); });
 
   window.addEventListener('resize', () => { screen.layout(); game.draw(tickCount); });
 

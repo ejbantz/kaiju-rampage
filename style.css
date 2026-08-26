@@ -176,3 +176,9 @@ kbd {
   border-color: var(--accent);
 }
 #diff button[data-d="nightmare"].on { background: var(--danger); border-color: var(--danger); }
+
+/* audio-state tell: amber when the context is not actually running */
+#vol[data-state="suspended"] label,
+#vol[data-state="none"] label { color: #ffb454; }
+#vol[data-state="muted"] label { color: var(--dim); }
+#vol[data-state="suspended"], #vol[data-state="none"] { opacity: 1; }
