@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Kaiju Rampage</title>
+<meta name="description" content="An ASCII kaiju game that runs in your browser. Stomp the city, dodge the missiles.">
+<meta property="og:title" content="Kaiju Rampage">
+<meta property="og:description" content="An ASCII kaiju game. Stomp the city, dodge the missiles.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#129430;</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="shell">
+  <canvas id="screen" aria-label="Kaiju Rampage game screen" role="img"></canvas>
+
+  <div id="overlay" class="hidden">
+    <div id="overlay-inner">
+      <h1>KAIJU RAMPAGE</h1>
+      <p class="tag">Flatten every building. The military disagrees.</p>
+      <table class="keys">
+        <tr><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd> / <kbd>A</kbd> <kbd>D</kbd></td><td>walk</td></tr>
+        <tr><td><kbd>Space</kbd></td><td>stomp buildings &amp; civilians</td></tr>
+        <tr><td><kbd>F</kbd></td><td>atomic breath</td></tr>
+        <tr><td><kbd>P</kbd> &middot; <kbd>B</kbd> &middot; <kbd>R</kbd></td><td>pause &middot; sound &middot; restart</td></tr>
+      </table>
+      <button id="start">START RAMPAGE</button>
+      <p class="hint">Eating civilians restores health. Missiles break your combo.</p>
+    </div>
+  </div>
+
+  <div id="touch" class="hidden">
+    <button data-key="left"  aria-label="Walk left">&larr;</button>
+    <button data-key="stomp" aria-label="Stomp">STOMP</button>
+    <button data-key="fire"  aria-label="Atomic breath">FIRE</button>
+    <button data-key="right" aria-label="Walk right">&rarr;</button>
+  </div>
+</div>
+<script src="game.js"></script>
+</body>
+</html>
