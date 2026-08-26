@@ -41,14 +41,37 @@ civilians, shoot down the helicopters, and try not to get blown up.
 On phones and tablets, on-screen buttons appear automatically. Landscape
 works much better than portrait.
 
+## Difficulty
+
+Pick one on the title screen; your choice is remembered. Measured against a
+bot that seeks buildings, stomps, and breathes on cooldown but never dodges
+-- a deliberate lower bound, since dodging is the main survival skill:
+
+| | Bot survived | Wave reached |
+|---|---|---|
+| **EASY** | never died | 12 |
+| **NORMAL** *(default)* | ~60s | 4 |
+| **HARD** | ~34s | 2 |
+| **NIGHTMARE** | ~16s | 1 |
+
+Difficulty scales what actually creates pressure: missile and shell damage,
+how fast the military arrives and how much of it there is, how much health a
+civilian restores, energy regeneration, how many floors a stomp takes off,
+and how much you recover between waves.
+
 ## How it plays
 
 Flatten every building to clear a wave. Each wave adds another helicopter
 (up to five) and tightens their fire rate, while granting you +25 HP, full
 energy, and 200 points.
 
+- **Tanks.** Ground armour rolls in, closes to a ~26 column standoff, and
+  fires flat shells at body height. You cannot walk out from under them the
+  way you can a helicopter: either breathe down the lane, which scorches
+  every tank in its path regardless of height, or close in and stomp one --
+  which means entering the range it is already shooting at.
 - **Combos.** Every hit inside a 45-tick window builds a multiplier up to
-  **×5**. Taking a missile resets it to zero. That's the core tension: press
+  **×5**. Taking a hit resets it to zero. That's the core tension: press
   the rampage for score, or back off and survive.
 - **Healing.** Eating a civilian restores 3 HP. They outrun a casual stroll
   but not a committed charge, so chasing them down is how you stay alive.

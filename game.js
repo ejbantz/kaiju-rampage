@@ -8,6 +8,29 @@
 'use strict';
 
 // ----------------------------------------------------------------- tuning
+/* Difficulty scales the things that actually create pressure: how hard the
+ * military hits, how fast it arrives, how much you recover, and how many
+ * floors a stomp takes off. NORMAL is deliberately harder than the game
+ * shipped with -- the old balance is roughly EASY now. */
+const DIFFICULTY = {
+  easy: {
+    label: 'EASY', dmg: 9, heal: 4, heliCap: 3, heliRate: 1.35, tankRate: 0.55,
+    tankCap: 2, waveHeal: 30, regen: 1.0, floors: [2, 4], shellDmg: 7,
+  },
+  normal: {
+    label: 'NORMAL', dmg: 15, heal: 3, heliCap: 5, heliRate: 0.95, tankRate: 1.0,
+    tankCap: 3, waveHeal: 16, regen: 0.75, floors: [2, 3], shellDmg: 11,
+  },
+  hard: {
+    label: 'HARD', dmg: 21, heal: 2, heliCap: 6, heliRate: 0.72, tankRate: 1.45,
+    tankCap: 4, waveHeal: 9, regen: 0.6, floors: [1, 3], shellDmg: 16,
+  },
+  nightmare: {
+    label: 'NIGHTMARE', dmg: 29, heal: 2, heliCap: 8, heliRate: 0.52, tankRate: 1.95,
+    tankCap: 5, waveHeal: 4, regen: 0.48, floors: [1, 2], shellDmg: 22,
+  },
+};
+
 const MAX_HP = 100;
 const MAX_EN = 100;
 const BREATH_COST = 30;
@@ -30,6 +53,7 @@ const COLOR = {
   dim:      '#4a5568',
   dimWin:   '#6b5a2e',
   rubble:   '#8a3b36',
+  tank:     '#c9a227',
 };
 
 // ---------------------------------------------------------------- sprites
@@ -121,6 +145,21 @@ const HELI_R = [
 ];
 const HELI_L = HELI_R.map(flip);
 const HELI_W = HELI_R[0][0].length;
+
+const TANK_R = [
+  sprite(String.raw`
+     ___
+   _/   \_=====
+  (o)(o)(o)
+`),
+  sprite(String.raw`
+     ___
+   _/   \_=====
+  (O)(o)(O)
+`),
+];
+const TANK_L = TANK_R.map(flip);
+const TANK_W = TANK_R[0][0].length;
 
 const CIV = [[' o ', '/|\\'], [' o ', '<|>']];
 
@@ -607,6 +646,44 @@ class Missile {
   update(groundY) { this.y += 0.9; if (this.y >= groundY) this.dead = true; }
 }
 
+class Tank {
+  /* Ground armour. Unlike helicopters it closes to a standoff range and
+   * shoots flat, so you cannot simply walk out from under it -- the only
+   * answers are atomic breath down the lane or stomping it directly. */
+  constructor(x, d, groundY, cooldown) {
+    this.x = x;
+    this.y = groundY - 3;
+    this.d = d;
+    this.frame = 0;
+    this.cooldown = cooldown;
+    this.baseCooldown = cooldown;
+    this.dead = false;
+  }
+  get center() { return this.x + TANK_W / 2; }
+  update(tick, gzCenter) {
+    const gap = Math.abs(this.center - gzCenter);
+    this.d = this.center > gzCenter ? -1 : 1;
+    if (gap > 26 && tick % 3 === 0) this.x += this.d;   // close to standoff range
+    if (tick % 6 === 0) this.frame++;
+    this.cooldown--;
+  }
+  wantsToFire(gzCenter) {
+    if (this.cooldown > 0) return false;
+    if (Math.abs(this.center - gzCenter) > 46) return false;
+    this.cooldown = this.baseCooldown + randint(-10, 20);
+    return true;
+  }
+  art() { return (this.d > 0 ? TANK_R : TANK_L)[Math.floor(this.frame) % 2]; }
+}
+
+class Shell {
+  constructor(x, y, d) { this.x = x; this.y = y; this.d = d; this.dead = false; }
+  update(width) {
+    this.x += this.d * 1.6;
+    if (this.x < -2 || this.x > width + 2) this.dead = true;
+  }
+}
+
 class Boom {
   constructor(x, y) { this.x = x; this.y = y; this.age = 0; }
   update() { this.age++; }
@@ -626,9 +703,11 @@ const bar = (value, max, width) => {
 };
 
 class Game {
-  constructor(screen, sfx) {
+  constructor(screen, sfx, difficulty = 'normal') {
     this.s = screen;
     this.sfx = sfx;
+    this.diffKey = DIFFICULTY[difficulty] ? difficulty : 'normal';
+    this.diff = DIFFICULTY[this.diffKey];
     this.w = screen.cols;
     this.h = screen.rows;
     this.groundY = this.h - 3;
@@ -670,10 +749,13 @@ class Game {
     this.shake = 0;
     this.helis = [];
     this.missiles = [];
+    this.tanks = [];
+    this.shells = [];
     this.civs = [];
     this.booms = [];
     this.beams = [];
-    this.heliTimer = 70;
+    this.heliTimer = Math.round(70 * this.diff.heliRate);
+    this.tankTimer = Math.round(150 / this.diff.tankRate);
     this.stars = [];
     for (let i = 0; i < Math.floor(this.w / 7); i++) {
       this.stars.push([randint(this.skyTop, Math.max(this.skyTop, this.groundY - 14)),
@@ -711,7 +793,7 @@ class Game {
       for (let c = this.feetLo; c < this.feetHi; c++) if (b.spans(c)) { over = true; break; }
       if (!over) continue;
       const before = b.h;
-      const floors = b.hit(randint(2, 4));
+      const floors = b.hit(randint(this.diff.floors[0], this.diff.floors[1]));
       if (floors) {
         hit = true;
         this.addScore(floors * 10);
@@ -729,8 +811,19 @@ class Game {
         hit = true;
         ate = true;
         this.eaten++;
-        this.hp = Math.min(MAX_HP, this.hp + CIV_HEAL);
+        this.hp = Math.min(MAX_HP, this.hp + this.diff.heal);
         this.addScore(15);
+      }
+    }
+
+    for (const tk of this.tanks) {
+      if (tk.dead) continue;
+      if (tk.x + TANK_W >= this.feetLo - 1 && tk.x <= this.feetHi + 1) {
+        tk.dead = true;
+        hit = true;
+        this.addScore(60);
+        this.booms.push(new Boom(Math.round(tk.center), this.groundY - 2));
+        this.beep('boom');
       }
     }
 
@@ -756,19 +849,27 @@ class Game {
       }
     }
     this.heliTimer--;
-    const cap = Math.min(5, 1 + this.wave);
+    const cap = Math.min(this.diff.heliCap, 1 + this.wave);
     if (this.heliTimer <= 0 && this.helis.length < cap) {
       const d = choice([1, -1]);
       const x = d > 0 ? -HELI_W : this.w;
       const y = randint(this.skyTop, Math.max(this.skyTop + 1, this.mouthY + 1));
       this.helis.push(new Helicopter(x, y, d, Math.max(25, HELI_BASE_COOLDOWN - this.wave * 8)));
-      this.heliTimer = Math.max(40, 140 - this.wave * 15);
+      this.heliTimer = Math.round(Math.max(35, 140 - this.wave * 15) * this.diff.heliRate);
+    }
+
+    this.tankTimer--;
+    if (this.tankTimer <= 0 && this.tanks.length < this.diff.tankCap) {
+      const d = choice([1, -1]);
+      this.tanks.push(new Tank(d > 0 ? -TANK_W : this.w, d, this.groundY,
+                               Math.max(28, 95 - this.wave * 7)));
+      this.tankTimer = Math.round(Math.max(45, 190 - this.wave * 18) / this.diff.tankRate);
     }
   }
 
   update(tick) {
     this.spawn();
-    this.energy = Math.min(MAX_EN, this.energy + EN_REGEN);
+    this.energy = Math.min(MAX_EN, this.energy + this.diff.regen);
     if (this.comboTimer > 0 && --this.comboTimer === 0) this.combo = 0;
 
     for (const c of this.civs) c.update(this.center, this.w, tick);
@@ -787,7 +888,7 @@ class Game {
       const mx = Math.round(m.x), my = Math.round(m.y);
       if (my >= this.gzTop && my < this.groundY && mx >= this.gx && mx < this.gx + GZ_W) {
         m.dead = true;
-        this.hp -= MISSILE_DAMAGE;
+        this.hp -= this.diff.dmg;
         this.shake = 6;
         this.combo = 0;
         this.booms.push(new Boom(mx, my));
@@ -798,6 +899,29 @@ class Game {
     }
     this.missiles = this.missiles.filter((m) => !m.dead);
 
+    for (const tk of this.tanks) {
+      tk.update(tick, this.center);
+      if (tk.wantsToFire(this.center)) {
+        const muzzle = tk.d > 0 ? tk.x + TANK_W : tk.x;
+        this.shells.push(new Shell(muzzle, tk.y + 1, tk.d));
+      }
+    }
+    this.tanks = this.tanks.filter((t) => !t.dead);
+
+    for (const sh of this.shells) {
+      sh.update(this.w);
+      const sx = Math.round(sh.x);
+      if (sx >= this.gx && sx < this.gx + GZ_W && sh.y >= this.gzTop && sh.y < this.groundY) {
+        sh.dead = true;
+        this.hp -= this.diff.shellDmg;
+        this.shake = 5;
+        this.combo = 0;
+        this.booms.push(new Boom(sx, sh.y));
+        this.beep('hit');
+      }
+    }
+    this.shells = this.shells.filter((s) => !s.dead);
+
     for (const beam of this.beams) {
       beam.update();
       const bx = Math.round(beam.x);
@@ -807,6 +931,15 @@ class Game {
           this.addScore(75);
           this.bumpCombo();
           this.booms.push(new Boom(hl.x + Math.floor(HELI_W / 2), hl.y + 1));
+          this.beep('boom');
+        }
+      }
+      for (const tk of this.tanks) {
+        if (!tk.dead && bx >= tk.x && bx <= tk.x + TANK_W) {
+          tk.dead = true;
+          this.addScore(60);
+          this.bumpCombo();
+          this.booms.push(new Boom(Math.round(tk.center), tk.y + 1));
           this.beep('boom');
         }
       }
@@ -834,7 +967,7 @@ class Game {
 
     if (!this.over && this.buildings.every((b) => b.dead)) {
       this.wave++;
-      this.hp = Math.min(MAX_HP, this.hp + 25);
+      this.hp = Math.min(MAX_HP, this.hp + this.diff.waveHeal);
       this.energy = MAX_EN;
       this.score += 200;
       this.waveBanner = 40;
@@ -881,6 +1014,8 @@ class Game {
     for (const c of this.civs) s.blit(c.y + dy, Math.round(c.x), c.art(), COLOR.civ, false);
     for (const hl of this.helis) s.blit(hl.y + dy, Math.round(hl.x), hl.art(), COLOR.hud);
     for (const m of this.missiles) s.put(Math.round(m.y) + dy, Math.round(m.x), '!', COLOR.fire);
+    for (const tk of this.tanks) s.blit(tk.y + dy, Math.round(tk.x), tk.art(), COLOR.tank);
+    for (const sh of this.shells) s.put(sh.y + dy, Math.round(sh.x), sh.d > 0 ? '=>' : '<=', COLOR.fire);
 
     for (const beam of this.beams) {
       const bx = Math.round(beam.x);
@@ -914,7 +1049,7 @@ class Game {
   drawHud() {
     const s = this.s;
     const standing = this.buildings.filter((b) => !b.dead).length;
-    const line = ` WAVE ${this.wave}   SCORE ${this.score}   x${this.multiplier}` +
+    const line = ` ${this.diff.label}   WAVE ${this.wave}   SCORE ${this.score}   x${this.multiplier}` +
                  `   STANDING ${standing}   EATEN ${this.eaten}`;
     s.put(0, 0, line.padEnd(this.w), COLOR.hud);
 
@@ -966,17 +1101,41 @@ class Game {
 
   const screen = new Screen(canvas, COLS, ROWS);
   const sfx = new Sfx();
-  let game = new Game(screen, sfx);
+  const DIFF_STORE = 'kaiju.difficulty';
+  let difficulty = 'normal';
+  try {
+    const saved = localStorage.getItem(DIFF_STORE);
+    if (saved && DIFFICULTY[saved]) difficulty = saved;
+  } catch (e) { /* storage blocked */ }
+
+  const diffBox = document.getElementById('diff');
+  const paintDiff = () => diffBox.querySelectorAll('button').forEach((b) =>
+    b.classList.toggle('on', b.dataset.d === difficulty));
+  diffBox.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-d]');
+    if (!b) return;
+    difficulty = b.dataset.d;
+    try { localStorage.setItem(DIFF_STORE, difficulty); } catch (err) { /* ignore */ }
+    paintDiff();
+  });
+  paintDiff();
+
+  let game = new Game(screen, sfx, difficulty);
   let running = false;
   let tickCount = 0;
   let acc = 0;
   let last = performance.now();
 
   const held = { left: false, right: false };
+  let overSince = null;
 
   function begin() {
     sfx.init();
     sfx.resume();
+    game = new Game(screen, sfx, difficulty);   // pick up any difficulty change
+    sfx.setIntensity(1);
+    tickCount = 0;
+    overSince = null;
     overlay.classList.add('hidden');
     if (matchMedia('(pointer: coarse)').matches) touch.classList.remove('hidden');
     running = true;
@@ -1062,6 +1221,17 @@ class Game {
         if (held.right) game.walk(1);
         game.tick(tickCount);
         tickCount++;
+        // after the death sting, hand the player back the difficulty picker
+        if (game.over) {
+          if (overSince === null) overSince = tickCount;
+          else if (tickCount - overSince > 34) {
+            running = false;
+            startBtn.textContent = 'RAMPAGE AGAIN';
+            overlay.classList.remove('hidden');
+          }
+        } else {
+          overSince = null;
+        }
       }
       game.draw(tickCount);
     }

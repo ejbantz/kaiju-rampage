@@ -148,3 +148,31 @@ kbd {
   cursor: pointer;
 }
 #volval { min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---------- difficulty ---------- */
+#diff {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: .4rem;
+  margin: 0 0 1.3rem;
+}
+#diff button {
+  font: inherit;
+  font-size: .72rem;
+  letter-spacing: .08em;
+  padding: .45rem .8rem;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid var(--dim);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: color .15s ease, border-color .15s ease, background .15s ease;
+}
+#diff button:hover { color: var(--fg); border-color: var(--fg); }
+#diff button.on {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+#diff button[data-d="nightmare"].on { background: var(--danger); border-color: var(--danger); }
