@@ -233,31 +233,96 @@ class Screen {
  * laptop and phone speakers actually reproduce sound; an earlier version
  * swept down to 35 Hz and was inaudible on anything without a woofer.
  *
- * `Chip` takes its AudioContext by injection so the exact same code can be
- * rendered into an OfflineAudioContext and measured in tests.
+ * `Chip` takes its AudioContext by injection, so the same synthesis code can
+ * be rendered into an OfflineAudioContext and measured in tests.
  */
 
-const NOTE = {
-  C2: 65.41,  E2: 82.41,  F2: 87.31,  G2: 98.00,  A2: 110.00, B2: 123.47,
-  C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61, G3: 196.00, A3: 220.00,
-  C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, G4: 392.00, A4: 440.00,
-  C5: 523.25, D5: 587.33, E5: 659.25, G5: 783.99, A5: 880.00, B5: 987.77,
-  C6: 1046.50, E6: 1318.51, G6: 1567.98,
+/** Equal-tempered note table, C1..B7, keyed "A4", "G#3", etc. */
+const NOTE = (() => {
+  const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const table = {};
+  for (let oct = 1; oct <= 7; oct++) {
+    names.forEach((n, i) => {
+      const midi = 12 * (oct + 1) + i;
+      table[n + oct] = 440 * Math.pow(2, (midi - 69) / 12);
+    });
+  }
+  return table;
+})();
+
+/** Pattern shorthand: whitespace-separated tokens, "." is a rest. */
+const P = (s) => s.trim().split(/\s+/).map((x) => (x === '.' ? null : x));
+
+/* An original four-bar-per-pattern song in A minor. Eighth notes, 32 steps
+ * per pattern, arranged so the loop runs about a minute before repeating. */
+const SONG = {
+  bpm: 132,
+  steps: 32,
+  order: ['A', 'A', 'B', 'A', 'C', 'C', 'B', 'A'],
+  patterns: {
+    // i - VI - III - VII : the engine room of the track
+    A: {
+      bass: P(`A2 A2 .  A2 .  A2 E3 .   F2 F2 .  F2 .  F2 C3 .
+               C3 C3 .  C3 .  C3 G2 .   G2 G2 .  G2 .  G2 D3 .`),
+      arp:  P(`A3 E4 C4 E4 A3 E4 C4 E4  F3 C4 A3 C4 F3 C4 A3 C4
+               C4 G4 E4 G4 C4 G4 E4 G4  G3 D4 B3 D4 G3 D4 B3 D4`),
+      lead: P(`E5 .  .  .  C5 .  D5 .   F5 .  .  E5 .  .  C5 .
+               E5 .  G5 .  A5 .  G5 .   D5 .  B4 .  D5 .  .  .`),
+      drum: P(`K  .  H  .  S  .  H  .   K  .  H  .  S  .  H  .
+               K  .  H  .  S  .  H  K   K  .  H  .  S  .  H  H`),
+    },
+    // iv - i - V - i : lifts the melody an octave, more air
+    B: {
+      bass: P(`D3 D3 .  D3 .  D3 A2 .   A2 A2 .  A2 .  A2 E3 .
+               E3 E3 .  E3 .  E3 B2 .   A2 A2 .  A2 E3 .  A2 .`),
+      arp:  P(`D4 A4 F4 A4 D4 A4 F4 A4  A3 E4 C4 E4 A3 E4 C4 E4
+               E4 B4 G#4 B4 E4 B4 G#4 B4 A3 E4 C4 E4 A3 C4 E4 A4`),
+      lead: P(`.  .  A5 .  G5 F5 .  .   E5 .  .  C5 .  .  A4 .
+               B4 .  C5 D5 .  E5 .  .   A5 .  .  G5 .  E5 .  .`),
+      drum: P(`K  .  H  H  S  .  H  .   K  .  H  .  S  .  H  K
+               K  .  H  H  S  .  H  .   K  K  H  .  S  S  H  H`),
+    },
+    // i - VII - VI - V : the descending climb, driving straight eighths
+    C: {
+      bass: P(`A2 A2 A2 A2 G2 G2 G2 G2  F2 F2 F2 F2 E2 E2 E2 E2
+               A2 A2 A2 A2 G2 G2 G2 G2  F2 F2 E2 E2 A2 A2 E3 E3`),
+      arp:  P(`A4 C5 E5 C5 G4 B4 D5 B4  F4 A4 C5 A4 E4 G#4 B4 G#4
+               A4 C5 E5 C5 G4 B4 D5 B4  F4 A4 C5 A4 E4 B4 E5 B4`),
+      lead: P(`A5 .  .  .  B5 .  .  .   C6 .  B5 .  A5 .  G#5 .
+               A5 .  E5 .  A5 .  C6 .   B5 .  A5 .  G#5 .  E5 .`),
+      drum: P(`K  H  H  .  S  H  H  .   K  H  H  .  S  H  H  K
+               K  H  H  .  S  H  H  .   K  K  S  .  S  H  K  S`),
+    },
+  },
 };
 
 class Chip {
   constructor(ctx, destination) {
     this.ctx = ctx;
-    this.out = ctx.createGain();
-    this.out.gain.value = 0.85;
-    this.out.connect(destination || ctx.destination);
-    this.music = ctx.createGain();
-    this.music.gain.value = 0.30;      // sits under the effects
-    this.music.connect(this.out);
+    // master -> user volume; effects and music sit on separate buses
+    this.master = ctx.createGain();
+    this.master.gain.value = 0.25;          // deliberately quiet on first run
+    this.master.connect(destination || ctx.destination);
+    this.out = ctx.createGain();            // effects bus
+    this.out.gain.value = 1.0;
+    this.out.connect(this.master);
+    this.music = ctx.createGain();          // music bus, tucked under effects
+    this.music.gain.value = 0.45;
+    this.music.connect(this.master);
+
     this._noiseBuf = null;
     this._timer = null;
     this._step = 0;
+    this._order = 0;
     this._next = 0;
+    this.bpm = SONG.bpm;
+  }
+
+  get volume() { return this.master.gain.value; }
+  setVolume(v) {
+    const clamped = Math.max(0, Math.min(1, v));
+    this.master.gain.setTargetAtTime(clamped, this.ctx.currentTime, 0.01);
+    return clamped;
   }
 
   get noiseBuf() {
@@ -305,47 +370,60 @@ class Chip {
     if (f1 !== null) filt.frequency.exponentialRampToValueAtTime(Math.max(60, f1), t + dur);
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    src.connect(filt).connect(g).connect(this.out === dest ? this.out : dest);
+    src.connect(filt).connect(g).connect(dest);
     src.start(t);
     src.stop(t + dur + 0.02);
   }
 
-  /** Stepped arpeggio -- the classic chiptune gesture. */
   arp(notes, t, step, dur, vol, type = 'square') {
     notes.forEach((f, i) => this.tone({ f0: f, t: t + i * step, dur, vol, type }));
+  }
+
+  /** Percussion. The kick keeps an audible click on top of its body -- a pure
+   *  low sine reads as silence on the speakers most people actually have. */
+  drum(kind, t, dest) {
+    if (kind === 'K') {
+      this.tone({ f0: 220, f1: 70, t, dur: 0.11, vol: 0.34, type: 'square', dest });
+      this.noise({ t, dur: 0.03, vol: 0.20, f0: 2600, type: 'bandpass', q: 0.8, dest });
+    } else if (kind === 'S') {
+      this.noise({ t, dur: 0.13, vol: 0.26, f0: 1900, type: 'bandpass', q: 0.6, dest });
+      this.tone({ f0: 320, f1: 180, t, dur: 0.07, vol: 0.12, type: 'triangle', dest });
+    } else if (kind === 'H') {
+      this.noise({ t, dur: 0.035, vol: 0.13, f0: 7500, type: 'highpass', q: 0.7, dest });
+    }
   }
 
   play(name, when = 0) {
     const t = this.ctx.currentTime + when;
     switch (name) {
-      case 'stomp':            // impact: mid thud + bright crunch
+      case 'stomp':
         this.tone({ f0: 260, f1: 90, t, dur: 0.13, vol: 0.42 });
         this.noise({ t, dur: 0.16, vol: 0.40, f0: 2200, f1: 420, type: 'bandpass', q: 0.7 });
         break;
-      case 'eat':              // coin blip
+      case 'eat':
         this.tone({ f0: NOTE.B5, t, dur: 0.06, vol: 0.26 });
         this.tone({ f0: NOTE.E6, t: t + 0.06, dur: 0.15, vol: 0.26 });
         break;
-      case 'breath':           // descending laser + hiss
+      case 'breath':
         this.tone({ f0: 1700, f1: 280, t, dur: 0.34, vol: 0.30, type: 'sawtooth' });
         this.tone({ f0: 1200, f1: 240, t, dur: 0.34, vol: 0.16 });
         this.noise({ t, dur: 0.32, vol: 0.22, f0: 4200, f1: 900, type: 'bandpass', q: 0.6 });
         break;
-      case 'hit':              // taking damage: harsh descending buzz
-        this.tone({ f0: 740, f1: 190, t, dur: 0.20, vol: 0.34, type: 'square' });
+      case 'hit':
+        this.tone({ f0: 740, f1: 190, t, dur: 0.20, vol: 0.34 });
         this.noise({ t, dur: 0.14, vol: 0.34, f0: 3000, f1: 700, type: 'bandpass', q: 0.5 });
         break;
-      case 'boom':             // helicopter kill
+      case 'boom':
         this.noise({ t, dur: 0.34, vol: 0.42, f0: 4500, f1: 380, type: 'lowpass', q: 0.8 });
         this.tone({ f0: 420, f1: 110, t, dur: 0.28, vol: 0.26 });
         break;
-      case 'death':            // descending minor run, then a low sting
+      case 'death':
         this.arp([NOTE.G5, NOTE.E5, NOTE.C5, NOTE.A4, NOTE.F4, NOTE.D4],
                  t, 0.085, 0.11, 0.30);
         this.tone({ f0: NOTE.C4, f1: NOTE.C2, t: t + 0.52, dur: 0.55, vol: 0.32, type: 'sawtooth' });
         this.noise({ t: t + 0.52, dur: 0.5, vol: 0.16, f0: 1200, f1: 260, type: 'lowpass' });
         break;
-      case 'fanfare':          // wave cleared: ascending major arpeggio
+      case 'fanfare':
         this.arp([NOTE.C5, NOTE.E5, NOTE.G5, NOTE.C6], t, 0.09, 0.12, 0.28);
         this.tone({ f0: NOTE.C6, t: t + 0.36, dur: 0.36, vol: 0.30 });
         this.tone({ f0: NOTE.E6, t: t + 0.36, dur: 0.36, vol: 0.18 });
@@ -353,44 +431,69 @@ class Chip {
     }
   }
 
-  // ---- looping background riff (16 steps, driving minor) ----------------
-  static BASS = ['A2','A2','A2','C3','A2','A2','G2','G2',
-                 'F2','F2','F2','A2','G2','G2','E2','E2'];
-  static LEAD = ['A4', null,'C5', null,'E5', null,'C5', null,
-                 'F4', null,'A4', null,'G4', null,'B5', null];
+  // ---- sequencer -------------------------------------------------------
+  /** Schedule one step of the current pattern at absolute time `t`. */
+  step(t, stepDur) {
+    const pat = SONG.patterns[SONG.order[this._order]];
+    const i = this._step;
+    const m = this.music;
+
+    const b = pat.bass[i];
+    if (b && NOTE[b]) this.tone({ f0: NOTE[b], t, dur: stepDur * 0.92, vol: 0.32,
+                                  type: 'triangle', dest: m });
+    const a = pat.arp[i];
+    if (a && NOTE[a]) this.tone({ f0: NOTE[a], t, dur: stepDur * 0.55, vol: 0.10,
+                                  type: 'square', dest: m });
+    const l = pat.lead[i];
+    if (l && NOTE[l]) this.tone({ f0: NOTE[l], t, dur: stepDur * 1.5, vol: 0.15,
+                                  type: 'square', dest: m });
+    const d = pat.drum[i];
+    if (d) this.drum(d, t, m);
+  }
 
   startMusic() {
     if (this._timer) return;
     this._step = 0;
-    this._next = this.ctx.currentTime + 0.1;
-    const stepDur = 0.125;                       // 120 bpm, eighth notes
+    this._order = 0;
+    this._next = this.ctx.currentTime + 0.12;
     this._timer = setInterval(() => {
-      while (this._next < this.ctx.currentTime + 0.2) {
-        const i = this._step % 16;
-        const bass = NOTE[Chip.BASS[i]];
-        if (bass) this.tone({ f0: bass, t: this._next, dur: stepDur * 0.85,
-                              vol: 0.30, type: 'triangle', dest: this.music });
-        const lead = Chip.LEAD[i] && NOTE[Chip.LEAD[i]];
-        if (lead) this.tone({ f0: lead, t: this._next, dur: stepDur * 0.5,
-                              vol: 0.13, type: 'square', dest: this.music });
+      const stepDur = 60 / (this.bpm * 2);          // eighth notes
+      while (this._next < this.ctx.currentTime + 0.25) {
+        this.step(this._next, stepDur);
         this._next += stepDur;
-        this._step++;
+        if (++this._step >= SONG.steps) {
+          this._step = 0;
+          this._order = (this._order + 1) % SONG.order.length;
+        }
       }
-    }, 40);
+    }, 30);
   }
 
   stopMusic() {
     if (this._timer) { clearInterval(this._timer); this._timer = null; }
   }
+
+  /** Push the tempo up as the waves escalate. */
+  setIntensity(wave) {
+    this.bpm = Math.min(168, SONG.bpm + (wave - 1) * 5);
+  }
 }
 
-/** Live wrapper: owns the real AudioContext and the unlock dance. */
+/** Live wrapper: owns the real AudioContext, the unlock dance, and volume. */
 class Sfx {
+  static STORE = 'kaiju.volume';
+
   constructor() {
     this.ctx = null;
     this.chip = null;
     this.enabled = true;
     this.musicOn = true;
+    let v = 0.25;
+    try {
+      const saved = localStorage.getItem(Sfx.STORE);
+      if (saved !== null) v = Math.max(0, Math.min(1, parseFloat(saved)));
+    } catch (e) { /* private mode, storage blocked -- keep the default */ }
+    this.volume = v;
   }
 
   init() {
@@ -399,6 +502,7 @@ class Sfx {
     if (!AC) return;
     this.ctx = new AC();
     this.chip = new Chip(this.ctx);
+    this.chip.setVolume(this.volume);
     if (this.musicOn) this.chip.startMusic();
   }
 
@@ -411,6 +515,15 @@ class Sfx {
     this.resume();
     this.chip.play(name);
   }
+
+  setVolume(v) {
+    this.volume = Math.max(0, Math.min(1, v));
+    if (this.chip) this.chip.setVolume(this.volume);
+    try { localStorage.setItem(Sfx.STORE, String(this.volume)); } catch (e) { /* ignore */ }
+    return this.volume;
+  }
+
+  nudgeVolume(delta) { return this.setVolume(this.volume + delta); }
 
   setEnabled(on) {
     this.enabled = on;
@@ -426,6 +539,8 @@ class Sfx {
     else this.chip.stopMusic();
     return this.musicOn;
   }
+
+  setIntensity(wave) { if (this.chip) this.chip.setIntensity(wave); }
 }
 
 // ---------------------------------------------------------------- entities
@@ -724,6 +839,7 @@ class Game {
       this.score += 200;
       this.waveBanner = 40;
       this.startWave();
+      if (this.sfx.setIntensity) this.sfx.setIntensity(this.wave);
       this.beep('fanfare');
     }
   }
@@ -867,6 +983,20 @@ class Game {
     last = performance.now();
   }
 
+  const volEl = document.getElementById('volume');
+  const volVal = document.getElementById('volval');
+  const showVol = (v) => {
+    const pct = Math.round(v * 100);
+    volEl.value = pct;
+    volVal.textContent = pct;
+  };
+  showVol(sfx.volume);
+  volEl.addEventListener('input', () => {
+    sfx.init();
+    sfx.resume();
+    showVol(sfx.setVolume(volEl.value / 100));
+  });
+
   startBtn.addEventListener('click', begin);
 
   // Browsers only allow audio to start from a user gesture, and a context can
@@ -887,6 +1017,8 @@ class Game {
     else if (k === 'p') game.paused = !game.paused;
     else if (k === 'b') { game.sound = !game.sound; sfx.setEnabled(game.sound); }
     else if (k === 'm') sfx.toggleMusic();
+    else if (k === '-' || k === '_') showVol(sfx.nudgeVolume(-0.05));
+    else if (k === '=' || k === '+') showVol(sfx.nudgeVolume(0.05));
     else if (k === 'r' && game.over) game.reset();
   });
 

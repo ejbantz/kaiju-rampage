@@ -35,6 +35,7 @@ civilians, shoot down the helicopters, and try not to get blown up.
 | <kbd>P</kbd> | Pause |
 | <kbd>B</kbd> | Toggle sound |
 | <kbd>M</kbd> | Toggle music |
+| <kbd>-</kbd> <kbd>+</kbd> | Volume (or use the slider, top-right) |
 | <kbd>R</kbd> | Restart (after game over) |
 
 On phones and tablets, on-screen buttons appear automatically. Landscape
@@ -82,8 +83,12 @@ A few details worth calling out:
   last ink column, so the kaiju is opaque against the skyline without
   punching a rectangular hole around his silhouette.
 - **Synthesised chiptune audio.** There are no sound files. Every effect and
-  the looping background riff are built live from square, pulse and triangle
-  voices, filtered-noise percussion, and stepped arpeggios. Voices are kept
+  every note of the soundtrack are built live from square, pulse and triangle
+  voices, filtered-noise percussion, and stepped arpeggios. The music is an
+  original four-bar-per-pattern song in A minor with bass, arpeggio, lead and
+  drum channels, arranged `A-A-B-A-C-C-B-A` so the loop runs about a minute,
+  and the tempo climbs with each wave. Effects and music sit on separate gain
+  buses under a master the player controls, so sound always cuts through. Voices are kept
   in the 200 Hz - 4 kHz band on purpose: an earlier version swept down to
   35 Hz and was inaudible on laptop and phone speakers, which roll off hard
   below ~200 Hz. The synth takes its `AudioContext` by injection, so the

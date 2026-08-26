@@ -23,10 +23,18 @@
         <tr><td><kbd>Space</kbd></td><td>stomp buildings &amp; civilians</td></tr>
         <tr><td><kbd>F</kbd></td><td>atomic breath</td></tr>
         <tr><td><kbd>P</kbd> &middot; <kbd>B</kbd> &middot; <kbd>M</kbd> &middot; <kbd>R</kbd></td><td>pause &middot; sound &middot; music &middot; restart</td></tr>
+        <tr><td><kbd>-</kbd> <kbd>+</kbd></td><td>volume</td></tr>
       </table>
       <button id="start">START RAMPAGE</button>
       <p class="hint">Eating civilians restores health. Missiles break your combo.</p>
     </div>
+  </div>
+
+  <div id="vol">
+    <label for="volume" title="Volume">&#9834;</label>
+    <input type="range" id="volume" min="0" max="100" step="1" value="25"
+           aria-label="Volume">
+    <span id="volval">25</span>
   </div>
 
   <div id="touch" class="hidden">

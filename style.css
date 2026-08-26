@@ -101,3 +101,50 @@ kbd {
   touch-action: manipulation;
 }
 #touch button:active { background: rgba(125, 255, 155, .2); }
+
+/* ---------- volume ---------- */
+#vol {
+  position: absolute;
+  top: .6rem;
+  right: .7rem;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .35rem .6rem;
+  background: rgba(20, 26, 36, .82);
+  border: 1px solid var(--dim);
+  border-radius: 999px;
+  font-size: .72rem;
+  color: var(--dim);
+  opacity: .55;
+  transition: opacity .18s ease;
+}
+#vol:hover, #vol:focus-within { opacity: 1; }
+#vol label { color: var(--accent); font-size: .9rem; line-height: 1; }
+#vol input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 84px;
+  height: 3px;
+  background: var(--dim);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+#vol input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+#vol input[type="range"]::-moz-range-thumb {
+  width: 12px; height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+#volval { min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; }
