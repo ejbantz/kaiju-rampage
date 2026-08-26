@@ -228,13 +228,169 @@ class Screen {
 }
 
 // ------------------------------------------------------------------- audio
-/* The terminal original synthesised WAVs because Ubuntu blacklists the PC
- * speaker. Here the same recipes are rebuilt live with Web Audio nodes. */
+/* Chiptune synthesis. Everything is generated live -- there are no sound
+ * files. Voices are deliberately pitched into the 200 Hz - 4 kHz band where
+ * laptop and phone speakers actually reproduce sound; an earlier version
+ * swept down to 35 Hz and was inaudible on anything without a woofer.
+ *
+ * `Chip` takes its AudioContext by injection so the exact same code can be
+ * rendered into an OfflineAudioContext and measured in tests.
+ */
+
+const NOTE = {
+  C2: 65.41,  E2: 82.41,  F2: 87.31,  G2: 98.00,  A2: 110.00, B2: 123.47,
+  C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61, G3: 196.00, A3: 220.00,
+  C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, G4: 392.00, A4: 440.00,
+  C5: 523.25, D5: 587.33, E5: 659.25, G5: 783.99, A5: 880.00, B5: 987.77,
+  C6: 1046.50, E6: 1318.51, G6: 1567.98,
+};
+
+class Chip {
+  constructor(ctx, destination) {
+    this.ctx = ctx;
+    this.out = ctx.createGain();
+    this.out.gain.value = 0.85;
+    this.out.connect(destination || ctx.destination);
+    this.music = ctx.createGain();
+    this.music.gain.value = 0.30;      // sits under the effects
+    this.music.connect(this.out);
+    this._noiseBuf = null;
+    this._timer = null;
+    this._step = 0;
+    this._next = 0;
+  }
+
+  get noiseBuf() {
+    if (!this._noiseBuf) {
+      const n = Math.floor(this.ctx.sampleRate * 1.0);
+      this._noiseBuf = this.ctx.createBuffer(1, n, this.ctx.sampleRate);
+      const d = this._noiseBuf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    }
+    return this._noiseBuf;
+  }
+
+  /** A square/pulse voice with an optional pitch bend and a snappy envelope. */
+  tone(opts) {
+    const { f0, f1 = null, t, dur, vol = 0.3, type = 'square',
+            attack = 0.004, dest = this.out } = opts;
+    const c = this.ctx;
+    const osc = c.createOscillator();
+    const g = c.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(f0, t);
+    if (f1 !== null && f1 !== f0) {
+      osc.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+    }
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g).connect(dest);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  }
+
+  /** Filtered noise -- percussion, explosions, breath texture. */
+  noise(opts) {
+    const { t, dur, vol = 0.3, f0 = 3000, f1 = null,
+            type = 'bandpass', q = 1, dest = this.out } = opts;
+    const c = this.ctx;
+    const src = c.createBufferSource();
+    const filt = c.createBiquadFilter();
+    const g = c.createGain();
+    src.buffer = this.noiseBuf;
+    filt.type = type;
+    filt.Q.value = q;
+    filt.frequency.setValueAtTime(f0, t);
+    if (f1 !== null) filt.frequency.exponentialRampToValueAtTime(Math.max(60, f1), t + dur);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(filt).connect(g).connect(this.out === dest ? this.out : dest);
+    src.start(t);
+    src.stop(t + dur + 0.02);
+  }
+
+  /** Stepped arpeggio -- the classic chiptune gesture. */
+  arp(notes, t, step, dur, vol, type = 'square') {
+    notes.forEach((f, i) => this.tone({ f0: f, t: t + i * step, dur, vol, type }));
+  }
+
+  play(name, when = 0) {
+    const t = this.ctx.currentTime + when;
+    switch (name) {
+      case 'stomp':            // impact: mid thud + bright crunch
+        this.tone({ f0: 260, f1: 90, t, dur: 0.13, vol: 0.42 });
+        this.noise({ t, dur: 0.16, vol: 0.40, f0: 2200, f1: 420, type: 'bandpass', q: 0.7 });
+        break;
+      case 'eat':              // coin blip
+        this.tone({ f0: NOTE.B5, t, dur: 0.06, vol: 0.26 });
+        this.tone({ f0: NOTE.E6, t: t + 0.06, dur: 0.15, vol: 0.26 });
+        break;
+      case 'breath':           // descending laser + hiss
+        this.tone({ f0: 1700, f1: 280, t, dur: 0.34, vol: 0.30, type: 'sawtooth' });
+        this.tone({ f0: 1200, f1: 240, t, dur: 0.34, vol: 0.16 });
+        this.noise({ t, dur: 0.32, vol: 0.22, f0: 4200, f1: 900, type: 'bandpass', q: 0.6 });
+        break;
+      case 'hit':              // taking damage: harsh descending buzz
+        this.tone({ f0: 740, f1: 190, t, dur: 0.20, vol: 0.34, type: 'square' });
+        this.noise({ t, dur: 0.14, vol: 0.34, f0: 3000, f1: 700, type: 'bandpass', q: 0.5 });
+        break;
+      case 'boom':             // helicopter kill
+        this.noise({ t, dur: 0.34, vol: 0.42, f0: 4500, f1: 380, type: 'lowpass', q: 0.8 });
+        this.tone({ f0: 420, f1: 110, t, dur: 0.28, vol: 0.26 });
+        break;
+      case 'death':            // descending minor run, then a low sting
+        this.arp([NOTE.G5, NOTE.E5, NOTE.C5, NOTE.A4, NOTE.F4, NOTE.D4],
+                 t, 0.085, 0.11, 0.30);
+        this.tone({ f0: NOTE.C4, f1: NOTE.C2, t: t + 0.52, dur: 0.55, vol: 0.32, type: 'sawtooth' });
+        this.noise({ t: t + 0.52, dur: 0.5, vol: 0.16, f0: 1200, f1: 260, type: 'lowpass' });
+        break;
+      case 'fanfare':          // wave cleared: ascending major arpeggio
+        this.arp([NOTE.C5, NOTE.E5, NOTE.G5, NOTE.C6], t, 0.09, 0.12, 0.28);
+        this.tone({ f0: NOTE.C6, t: t + 0.36, dur: 0.36, vol: 0.30 });
+        this.tone({ f0: NOTE.E6, t: t + 0.36, dur: 0.36, vol: 0.18 });
+        break;
+    }
+  }
+
+  // ---- looping background riff (16 steps, driving minor) ----------------
+  static BASS = ['A2','A2','A2','C3','A2','A2','G2','G2',
+                 'F2','F2','F2','A2','G2','G2','E2','E2'];
+  static LEAD = ['A4', null,'C5', null,'E5', null,'C5', null,
+                 'F4', null,'A4', null,'G4', null,'B5', null];
+
+  startMusic() {
+    if (this._timer) return;
+    this._step = 0;
+    this._next = this.ctx.currentTime + 0.1;
+    const stepDur = 0.125;                       // 120 bpm, eighth notes
+    this._timer = setInterval(() => {
+      while (this._next < this.ctx.currentTime + 0.2) {
+        const i = this._step % 16;
+        const bass = NOTE[Chip.BASS[i]];
+        if (bass) this.tone({ f0: bass, t: this._next, dur: stepDur * 0.85,
+                              vol: 0.30, type: 'triangle', dest: this.music });
+        const lead = Chip.LEAD[i] && NOTE[Chip.LEAD[i]];
+        if (lead) this.tone({ f0: lead, t: this._next, dur: stepDur * 0.5,
+                              vol: 0.13, type: 'square', dest: this.music });
+        this._next += stepDur;
+        this._step++;
+      }
+    }, 40);
+  }
+
+  stopMusic() {
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+  }
+}
+
+/** Live wrapper: owns the real AudioContext and the unlock dance. */
 class Sfx {
   constructor() {
     this.ctx = null;
+    this.chip = null;
     this.enabled = true;
-    this.noiseBuf = null;
+    this.musicOn = true;
   }
 
   init() {
@@ -242,93 +398,33 @@ class Sfx {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     this.ctx = new AC();
-    this.master = this.ctx.createGain();
-    this.master.gain.value = 0.5;
-    this.master.connect(this.ctx.destination);
-
-    const n = this.ctx.sampleRate * 1.2;
-    this.noiseBuf = this.ctx.createBuffer(1, n, this.ctx.sampleRate);
-    const d = this.noiseBuf.getChannelData(0);
-    for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    this.chip = new Chip(this.ctx);
+    if (this.musicOn) this.chip.startMusic();
   }
 
   resume() {
-    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
-  }
-
-  _sweep(f0, f1, dur, vol, type = 'sawtooth') {
-    const t = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const g = this.ctx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(f0, t);
-    osc.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
-    g.gain.setValueAtTime(vol, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    osc.connect(g).connect(this.master);
-    osc.start(t);
-    osc.stop(t + dur + 0.02);
-  }
-
-  _noise(dur, vol, cutoff = 1800) {
-    const t = this.ctx.currentTime;
-    const src = this.ctx.createBufferSource();
-    const g = this.ctx.createGain();
-    const lp = this.ctx.createBiquadFilter();
-    src.buffer = this.noiseBuf;
-    lp.type = 'lowpass';
-    lp.frequency.setValueAtTime(cutoff, t);
-    g.gain.setValueAtTime(vol, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    src.connect(lp).connect(g).connect(this.master);
-    src.start(t);
-    src.stop(t + dur + 0.02);
-  }
-
-  _note(freq, dur, when, vol = 0.25) {
-    const t = this.ctx.currentTime + when;
-    const osc = this.ctx.createOscillator();
-    const g = this.ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(freq, t);
-    g.gain.setValueAtTime(vol, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    osc.connect(g).connect(this.master);
-    osc.start(t);
-    osc.stop(t + dur + 0.02);
+    if (this.ctx && this.ctx.state !== 'running') this.ctx.resume();
   }
 
   play(name) {
-    if (!this.enabled || !this.ctx) return;
+    if (!this.enabled || !this.chip) return;
     this.resume();
-    switch (name) {
-      case 'stomp':
-        this._sweep(150, 35, 0.22, 0.55);
-        this._noise(0.16, 0.28, 700);
-        break;
-      case 'breath':
-        this._sweep(1100, 220, 0.40, 0.30, 'sawtooth');
-        this._noise(0.38, 0.30, 3200);
-        break;
-      case 'hit':
-        this._noise(0.18, 0.45, 5000);
-        this._sweep(400, 90, 0.16, 0.35, 'square');
-        break;
-      case 'boom':
-        this._noise(0.12, 0.40, 2600);
-        this._sweep(300, 60, 0.26, 0.35);
-        break;
-      case 'death':
-        this._sweep(320, 45, 1.1, 0.45);
-        this._noise(0.9, 0.18, 900);
-        break;
-      case 'fanfare':
-        this._note(392, 0.14, 0.00);
-        this._note(523, 0.14, 0.13);
-        this._note(659, 0.32, 0.26);
-        this._note(784, 0.32, 0.26, 0.18);
-        break;
-    }
+    this.chip.play(name);
+  }
+
+  setEnabled(on) {
+    this.enabled = on;
+    if (!this.chip) return;
+    if (on && this.musicOn) this.chip.startMusic();
+    else this.chip.stopMusic();
+  }
+
+  toggleMusic() {
+    this.musicOn = !this.musicOn;
+    if (!this.chip) return this.musicOn;
+    if (this.musicOn && this.enabled) this.chip.startMusic();
+    else this.chip.stopMusic();
+    return this.musicOn;
   }
 }
 
@@ -510,11 +606,13 @@ class Game {
       }
     }
 
+    let ate = false;
     for (const c of this.civs) {
       if (c.dead) continue;
       if (c.x >= this.feetLo - 1 && c.x <= this.feetHi) {
         c.dead = true;
         hit = true;
+        ate = true;
         this.eaten++;
         this.hp = Math.min(MAX_HP, this.hp + CIV_HEAL);
         this.addScore(15);
@@ -522,6 +620,7 @@ class Game {
     }
 
     if (hit) { this.bumpCombo(); this.beep('stomp'); }
+    if (ate) this.beep('eat');
   }
 
   fire() {
@@ -770,6 +869,11 @@ class Game {
 
   startBtn.addEventListener('click', begin);
 
+  // Browsers only allow audio to start from a user gesture, and a context can
+  // be re-suspended by the OS (tab switch, screen lock). Nudge it on anything.
+  ['pointerdown', 'keydown', 'touchstart'].forEach((ev) =>
+    addEventListener(ev, () => { sfx.init(); sfx.resume(); }, { passive: true }));
+
   window.addEventListener('resize', () => { screen.layout(); game.draw(tickCount); });
 
   addEventListener('keydown', (e) => {
@@ -781,7 +885,8 @@ class Game {
     else if (k === ' ') game.stomp();
     else if (k === 'f') game.fire();
     else if (k === 'p') game.paused = !game.paused;
-    else if (k === 'b') { game.sound = !game.sound; sfx.enabled = game.sound; }
+    else if (k === 'b') { game.sound = !game.sound; sfx.setEnabled(game.sound); }
+    else if (k === 'm') sfx.toggleMusic();
     else if (k === 'r' && game.over) game.reset();
   });
 
