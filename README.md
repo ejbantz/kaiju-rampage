@@ -34,6 +34,7 @@ civilians, shoot down the helicopters, and try not to get blown up.
 | <kbd>F</kbd> | Atomic breath — costs energy, downs helicopters |
 | <kbd>P</kbd> | Pause |
 | <kbd>B</kbd> | Toggle sound |
+| <kbd>M</kbd> | Toggle music |
 | <kbd>R</kbd> | Restart (after game over) |
 
 On phones and tablets, on-screen buttons appear automatically. Landscape
@@ -80,8 +81,14 @@ A few details worth calling out:
 - **Scanline occlusion.** Sprites blank each row only from its first to its
   last ink column, so the kaiju is opaque against the skyline without
   punching a rectangular hole around his silhouette.
-- **Synthesised audio.** There are no sound files. Every effect is built live
-  from Web Audio oscillators, frequency ramps, and filtered white noise.
+- **Synthesised chiptune audio.** There are no sound files. Every effect and
+  the looping background riff are built live from square, pulse and triangle
+  voices, filtered-noise percussion, and stepped arpeggios. Voices are kept
+  in the 200 Hz - 4 kHz band on purpose: an earlier version swept down to
+  35 Hz and was inaudible on laptop and phone speakers, which roll off hard
+  below ~200 Hz. The synth takes its `AudioContext` by injection, so the
+  same code renders into an `OfflineAudioContext` and the output can be
+  measured rather than guessed at.
 - **Fixed timestep.** Simulation runs on a 55 ms accumulator independent of
   the display refresh rate, with a clamp so a backgrounded tab doesn't
   fast-forward the whole city on return.
